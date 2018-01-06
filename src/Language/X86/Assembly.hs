@@ -3,23 +3,28 @@
 
 module Language.X86.Assembly where
 
+import Data.Foldable (foldl')
 import Data.Data
 import GHC.Generics
 import Control.DeepSeq
 
 import Data.Int (Int32)
 import qualified Data.Sequence as S
+import qualified Data.Map as M
 
 
 
 
 
-type Code = S.Seq Line
+data Code = Code
+  { cCode :: S.Seq Line
+  , cLabelMap :: M.Map Label Int32
+  }
+  deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
 
 data Line = Line
   { lineAnn   :: !Int32
-  , lineLabel :: !(Maybe String)
   , lineInst  :: !Instruction
   }
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
@@ -40,6 +45,7 @@ data Instruction
   | ISal  !Arg !Arg
   | ITest !Arg !Arg
   | IMul  !Arg
+  | Label !Label
   | IJmp  !Address
   | IJe   !Address
   | IJne  !Address
@@ -54,24 +60,26 @@ data Instruction
 
 type Label = String
 
-data Address
-  = Label !Label
-  | AAE !ArithExpr
+data AddressVar
+  = AL Label
+  | AR Reg
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
+
+type Address = ArithExpr AddressVar
 
 -- | The Arg type
 --   represents an x86 assembly argument to an instruction
 data Arg
   = Ref !Arg
-  | AE !ArithExpr
+  | AE !(ArithExpr Reg)
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
-data ArithExpr
+data ArithExpr var
   = Lit !Int32
-  | Reg !Reg
-  | Add !ArithExpr !ArithExpr
-  | Mul !ArithExpr !ArithExpr
-  | Sub !ArithExpr !ArithExpr
+  | Var !var
+  | Add !(ArithExpr var) !(ArithExpr var)
+  | Mul !(ArithExpr var) !(ArithExpr var)
+  | Sub !(ArithExpr var) !(ArithExpr var)
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
 -- | The Reg type
@@ -100,6 +108,18 @@ data Loc
 
 
 toCode :: [Instruction] -> Code
-toCode insts =
-  S.fromList $ zipWith (\l i -> Line l Nothing i) [0..] (insts ++ [IHalt])
-
+toCode insts = Code
+  { cCode =
+    S.fromList
+    . reverse
+    . (Line lastNum IHalt:)
+    $ rInstructions
+  , cLabelMap = labelmap
+  }
+  where
+    (labelmap, rInstructions, lastNum) = foldl' go (M.empty, [], 0) insts
+    go (labels, rLines, num) = \case
+      Label l ->
+        (M.insert l num labels, rLines, num)
+      inst ->
+        (labels, Line num inst : rLines, num + 1)

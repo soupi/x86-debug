@@ -35,13 +35,13 @@ data Machine = Machine
   }
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
-evalArith :: Machine -> ArithExpr -> Int32
-evalArith m@Machine{..} = \case
-  Lit i -> i
-  Reg reg -> getReg reg m
-  Add e1 e2 -> evalArith m e1 + evalArith m e2
-  Sub e1 e2 -> evalArith m e1 - evalArith m e2
-  Mul e1 e2 -> evalArith m e1 * evalArith m e2
+evalArith :: (ref -> Either Error Int32) -> ArithExpr ref -> Either Error Int32
+evalArith lookupVar = \case
+  Lit i -> pure i
+  Var var -> lookupVar var
+  Add e1 e2 -> (+) <$> evalArith lookupVar e1 <*> evalArith lookupVar e2
+  Sub e1 e2 -> (-) <$> evalArith lookupVar e1 <*> evalArith lookupVar e2
+  Mul e1 e2 -> (*) <$> evalArith lookupVar e1 <*> evalArith lookupVar e2
 
 data Error
   = Error Machine String ErrorType
@@ -53,7 +53,7 @@ data ErrorType
   | DivByZero
   | LabelNotFound Label
   | InvalidMem Int32
-  | InvalidDest ArithExpr
+  | InvalidDest (ArithExpr Reg)
   | InstructionNotFound Int32
   | UnexpectedNoMachine
   | Unexpected String
@@ -68,14 +68,14 @@ throwError f m = Left . Error m f
 
 evalArg :: Machine -> Arg -> Either Error Int32
 evalArg m = \case
-  AE e -> pure $ evalArith m e
+  AE e -> evalArith (pure . flip getReg m) e
   Ref arg -> do
     i <- evalArg m arg
     getMem i m
 
 evalLoc :: Machine -> Arg -> Either Error Loc
 evalLoc m = \case
-  AE (Reg r) -> pure $ LocReg r
+  AE (Var r) -> pure $ LocReg r
   AE e -> throwError "evalLoc" m $ InvalidDest e
   arg -> LocMem <$> evalArg m arg
 
@@ -143,19 +143,19 @@ stepForward machine@Machine{} =
       next
         <=< checkStack
           . overReg ESP (\v -> v + 4)
-        <=< applyDestSrc (flip const) dest (Ref $ AE $ Reg ESP)
+        <=< applyDestSrc (flip const) dest (Ref $ AE $ Var ESP)
           $ machine
 
     IPush src -> do
       next
-        <=< applyDestSrc (flip const) (Ref $ AE $ Reg ESP) src
+        <=< applyDestSrc (flip const) (Ref $ AE $ Var ESP) src
         <=< checkStack
           . overReg ESP (\v -> v - 4)
           $ machine
 
     ICall addr -> do
       setAddress addr
-        <=< applyDestSrc (flip const) (Ref $ AE $ Reg ESP) (AE $ Add (Reg EIP) (Lit 4))
+        <=< applyDestSrc (flip const) (Ref $ AE $ Var ESP) (AE $ Add (Var EIP) (Lit 4))
         <=< checkStack
           . overReg ESP (\v -> v - 4)
           $ machine
@@ -164,8 +164,8 @@ stepForward machine@Machine{} =
       uncurry setAddress
         <=< secondF checkStack
           . second  (overReg ESP (\v -> v + 4))
-        <=< secondF (applyDestSrc (flip const) (AE $ Reg EIP) (Ref $ AE $ Reg ESP))
-          $ (AAE $ Lit $ getReg EIP machine, machine)
+        <=< secondF (applyDestSrc (flip const) (AE $ Var EIP) (Ref $ AE $ Var ESP))
+          $ (Lit $ getReg EIP machine, machine)
 
 
 interpret :: State -> Either Error State
@@ -190,6 +190,9 @@ initMachine code = Machine
   , mMem   = V.replicate memSize 0
   , mFlags = M.empty
   , mCode  = code
+    { cCode = cCode code
+    , cLabelMap = fmap ((memSize * 4 +) . (4*)) $ cLabelMap code
+    }
   }
   where
     memSize :: forall a. Integral a => a
@@ -211,7 +214,7 @@ getInstruction machine = do
   maybe
     (throwError "getInstruction" machine $ InvalidMem eip)
     (pure . lineInst)
-    (S.lookup (fromIntegral ip) (mCode machine))
+    (S.lookup (fromIntegral ip) (cCode $ mCode machine))
 
 getReg :: Reg -> Machine -> Int32
 getReg reg = fromMaybe 0 . M.lookup reg . mRegs
@@ -292,15 +295,18 @@ evalIndex i m = do
 
 setAddress :: Address -> Machine -> Either Error Machine
 setAddress address machine =
-  flip (setReg EIP) machine <$> case address of
-    AAE e ->
-      pure $ evalArith machine e
-    Label l -> do
-      case S.lookup 0 $ S.filter ((== Just l) . lineLabel) (mCode machine) of
+  flip (setReg EIP) machine
+    <$> evalArith (flip lookupAddrVar machine) address
+  where
+    lookupAddrVar var m = case var of
+      AR r -> pure $ getReg r m
+      AL l -> case M.lookup l . cLabelMap . mCode $ m of
         Nothing ->
-          throwError "setAddress" machine $ LabelNotFound l
-        Just line ->
-          pure $ lineAnn line
+          throwError "lookupAddrVar" m $ LabelNotFound l
+        Just addr ->
+          pure addr
+
+
 
 checkStack :: Machine -> Either Error Machine
 checkStack m

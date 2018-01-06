@@ -1,0 +1,110 @@
+name:                x86-debug
+version:             0.1.0.0
+synopsis:            An x86 assembly debugger
+description:         Please see README.md
+homepage:            https://github.com/soupi/x86
+license:             BSD3
+license-file:        LICENSE
+author:              Gil Mizrahi
+maintainer:          gilmi@posteo.net
+copyright:           2018 Gil Mizrahi
+category:            Compiler
+build-type:          Simple
+extra-source-files:  README.md
+cabal-version:       >=1.10
+tested-with:         GHC == 8.2.2
+
+library
+  hs-source-dirs:      src
+  exposed-modules:
+     Language.X86
+   , Language.X86.Run
+   , Language.X86.Assembly
+   , Language.X86.Interpreter
+  other-modules:
+  build-depends:
+     base
+    ,containers
+    ,vector
+    ,bifunctors
+    ,groom
+    ,transformers
+    ,mtl
+    ,syb
+    ,deepseq
+    ,groom
+    ,text
+    ,bytestring
+    ,megaparsec
+
+  default-extensions:
+      ConstraintKinds
+      DataKinds
+      DeriveFunctor
+      EmptyDataDecls
+      FlexibleContexts
+      KindSignatures
+      LambdaCase
+      MultiParamTypeClasses
+      PatternGuards
+      PatternSynonyms
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      TupleSections
+      ViewPatterns
+
+  default-language:    Haskell2010
+  ghc-options:         -Wall
+                       -fno-warn-type-defaults
+
+executable x86-debug
+  default-language:    Haskell2010
+  ghc-options:         -fno-warn-type-defaults
+                       -threaded -rtsopts -with-rtsopts=-N
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  build-depends:       base
+    , x86-debug
+    , optparse-generic
+    , stm
+    , brick
+    , microlens
+
+test-suite test
+  default-language:    Haskell2010
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:
+      Main.hs
+  other-modules:
+      Testing
+    , Simple
+  build-depends:       base
+                     , groom
+                     , text
+                     , tasty
+                     , tasty-hunit
+                     , tasty-quickcheck
+                     , x86-debug
+  ghc-options:         -fno-warn-type-defaults
+                       -threaded -rtsopts -with-rtsopts=-N
+
+  default-extensions:
+      ConstraintKinds
+      DeriveFunctor
+      EmptyDataDecls
+      KindSignatures
+      LambdaCase
+      MultiParamTypeClasses
+      PatternGuards
+      PatternSynonyms
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      TupleSections
+      ViewPatterns
+
+source-repository head
+  type:     git
+  location: https://github.com/soupi/x86-debug

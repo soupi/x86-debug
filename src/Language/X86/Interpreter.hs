@@ -8,10 +8,13 @@ import qualified Data.Vector as V
 import qualified Data.Map as M
 
 import Data.Int (Int32)
+import Data.Bits
 import Data.Maybe
 import Data.Data
 import GHC.Generics
 import Control.DeepSeq
+import Control.Monad
+import Control.Arrow (second)
 
 import Language.X86.Assembly
 
@@ -25,10 +28,10 @@ import Debug.Trace
 type State = [Machine]
 
 data Machine = Machine
-  { mMem  :: V.Vector Int32
-  , mRegs :: M.Map Reg Int32
-  , mZf   :: !Bool
-  , mCode :: Code
+  { mMem   :: V.Vector Int32
+  , mRegs  :: M.Map Reg Int32
+  , mFlags :: M.Map Flag Bool
+  , mCode  :: Code
   }
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
@@ -80,13 +83,90 @@ stepForward :: Machine -> Either Error Machine
 stepForward machine@Machine{} =
   getInstruction machine >>= {- pure . traceShowId >>= -} \case
     IHalt -> pure machine
-    IMov dest src ->
+    IMov dest src -> applyDestSrc (flip const) dest src machine
+    IAdd dest src -> applyDestSrc (+) dest src machine
+    ISub dest src -> applyDestSrc (-) dest src machine
+    IAnd dest src -> applyDestSrc (.&.) dest src machine
+    IOr  dest src -> applyDestSrc (.|.) dest src machine
+    IXor dest src -> applyDestSrc xor dest src machine
+    ISal dest src -> applyDestSrc (\x y -> shiftL x (fromIntegral y)) dest src machine
+    ISar dest src -> applyDestSrc (\x y -> shiftR x (fromIntegral y)) dest src machine
+    IShl dest src -> applyDestSrc (\x y -> shiftL (clearBit x 31) (fromIntegral y)) dest src machine
+    IShr dest src -> applyDestSrc (\x y -> shiftR (clearBit x 31) (fromIntegral y)) dest src machine
+    IMul src -> do
+      v <- evalArg machine src
+      next $ overReg EAX (*v) machine
+    ICmp dest src -> do
       evalDestSrc dest src machine >>= \case
         (LocReg r, v) -> do
-          next $ setReg r v machine
-          
-        (LocMem i, v)  ->
-          next =<< setMem i v machine
+          let rv = getReg r machine
+          next $ setFlag ZF (rv == v) machine
+        (LocMem i, v)  -> do
+          mv <- getMem i machine
+          next $ setFlag ZF (mv == v) machine
+    ITest dest src -> do
+      evalDestSrc dest src machine >>= \case
+        (LocReg r, v) -> do
+          let rv = getReg r machine
+          next $ setFlag ZF (rv .&. v == 0) machine
+        (LocMem i, v)  -> do
+          mv <- getMem i machine
+          next $ setFlag ZF (mv .&. v == 0) machine
+    IJmp address ->
+      setAddress address machine
+    IJz address -> do
+      if getFlag ZF machine
+        then
+          setAddress address machine
+        else
+          next machine
+    IJnz address -> do
+      if not (getFlag ZF machine)
+        then
+          setAddress address machine
+        else
+          next machine
+    IJe address -> do
+      if not (getFlag ZF machine)
+        then
+          setAddress address machine
+        else
+          next machine
+    IJne address -> do
+      if not (getFlag ZF machine)
+        then
+          setAddress address machine
+        else
+          next machine
+
+    IPop dest ->
+      next
+        <=< checkStack
+          . overReg ESP (\v -> v + 4)
+        <=< applyDestSrc (flip const) dest (Ref $ AE $ Reg ESP)
+          $ machine
+
+    IPush src -> do
+      next
+        <=< applyDestSrc (flip const) (Ref $ AE $ Reg ESP) src
+        <=< checkStack
+          . overReg ESP (\v -> v - 4)
+          $ machine
+
+    ICall addr -> do
+      setAddress addr
+        <=< applyDestSrc (flip const) (Ref $ AE $ Reg ESP) (AE $ Add (Reg EIP) (Lit 4))
+        <=< checkStack
+          . overReg ESP (\v -> v - 4)
+          $ machine
+
+    IRet -> do
+      uncurry setAddress
+        <=< secondF checkStack
+          . second  (overReg ESP (\v -> v + 4))
+        <=< secondF (applyDestSrc (flip const) (AE $ Reg EIP) (Ref $ AE $ Reg ESP))
+          $ (AAE $ Lit $ getReg EIP machine, machine)
+
 
 interpret :: State -> Either Error State
 interpret !state = do
@@ -101,17 +181,23 @@ interpret !state = do
 -----------
 -- Utils --
 -----------
-
 initMachine :: Code -> Machine
 initMachine code = Machine
-  { mRegs = M.fromList [(EIP, memSize * 4)]
-  , mMem  = V.replicate memSize 0
-  , mZf   = False
-  , mCode = code
+  { mRegs  = M.fromList
+    [ (EIP, memSize * 4)
+    , (ESP, memSize * 4 - 4)
+    ]
+  , mMem   = V.replicate memSize 0
+  , mFlags = M.empty
+  , mCode  = code
   }
   where
     memSize :: forall a. Integral a => a
     memSize = 4096
+
+---------------
+-- Accessors --
+---------------
 
 getMachine :: State -> Either Error Machine
 getMachine = \case
@@ -138,12 +224,16 @@ overReg :: Reg -> (Int32 -> Int32) -> Machine -> Machine
 overReg reg f machine =
   machine { mRegs = M.alter (Just . f . fromMaybe 0) reg (mRegs machine) }
 
-next :: Machine -> Either Error Machine
-next = pure . overReg EIP (+4)
+getFlag :: Flag -> Machine -> Bool
+getFlag flag = fromMaybe False . M.lookup flag . mFlags
 
-evalDestSrc :: Arg -> Arg -> Machine -> Either Error (Loc, Int32)
-evalDestSrc dest src state =
-  (,) <$> evalLoc state dest <*> evalArg state src
+setFlag :: Flag -> Bool -> Machine -> Machine
+setFlag flag val machine =
+  machine { mFlags = M.alter (const $ Just val) flag (mFlags machine) }
+
+overFlag :: Flag -> (Bool -> Bool) -> Machine -> Machine
+overFlag flag f machine =
+  machine { mFlags = M.alter (Just . f . fromMaybe False) flag (mFlags machine) }
 
 getMem :: Int32 -> Machine -> Either Error Int32
 getMem i m = do
@@ -164,6 +254,23 @@ overMem i f machine = do
         V.// [(fromIntegral index, f $ mMem machine V.! fromIntegral index)]
     }
 
+---
+
+next :: Machine -> Either Error Machine
+next = pure . overReg EIP (+4)
+
+evalDestSrc :: Arg -> Arg -> Machine -> Either Error (Loc, Int32)
+evalDestSrc dest src state =
+  (,) <$> evalLoc state dest <*> evalArg state src
+
+applyDestSrc :: (Int32 -> Int32 -> Int32) -> Arg -> Arg -> Machine -> Either Error Machine
+applyDestSrc f dest src machine =
+  evalDestSrc dest src machine >>= \case
+    (LocReg r, v) -> do
+      next $ overReg r (`f` v) machine
+    (LocMem i, v)  ->
+      next =<< overMem i (`f` v) machine
+
 evalIndex :: Integral a => Int32 -> Machine -> Either Error a
 evalIndex i m = do
   index <-
@@ -182,3 +289,27 @@ evalIndex i m = do
       throwError "evalIndex3" m $ InvalidMem index
     | otherwise ->
       pure $ fromIntegral index
+
+setAddress :: Address -> Machine -> Either Error Machine
+setAddress address machine =
+  flip (setReg EIP) machine <$> case address of
+    AAE e ->
+      pure $ evalArith machine e
+    Label l -> do
+      case S.lookup 0 $ S.filter ((== Just l) . lineLabel) (mCode machine) of
+        Nothing ->
+          throwError "setAddress" machine $ LabelNotFound l
+        Just line ->
+          pure $ lineAnn line
+
+checkStack :: Machine -> Either Error Machine
+checkStack m
+  | getReg ESP m >= fromIntegral (length $ mMem m) =
+    throwError "stepForward:IPush" m $ StackUnderflow
+  | getReg ESP m < 0 =
+    throwError "stepForward:IPush" m $ StackOverflow
+  | otherwise =
+    pure m
+
+secondF :: Functor f => (b -> f c) -> (a, b) -> f (a, c)
+secondF f (a, b) = (a,) <$> f b

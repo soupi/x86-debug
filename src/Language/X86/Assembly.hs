@@ -18,7 +18,7 @@ type Code = S.Seq Line
 
 
 data Line = Line
-  { lineAnn   :: !Int
+  { lineAnn   :: !Int32
   , lineLabel :: !(Maybe String)
   , lineInst  :: !Instruction
   }
@@ -40,12 +40,12 @@ data Instruction
   | ISal  !Arg !Arg
   | ITest !Arg !Arg
   | IMul  !Arg
-  | IJmp  !Label
-  | IJe   !Label
-  | IJnz  !Label
-  | IJz   !Label
-  | IJge  !Label
-  | ICall !Label
+  | IJmp  !Address
+  | IJe   !Address
+  | IJne  !Address
+  | IJnz  !Address
+  | IJz   !Address
+  | ICall !Address
   | IPush !Arg
   | IPop  !Arg
   | IRet
@@ -53,6 +53,11 @@ data Instruction
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
 type Label = String
+
+data Address
+  = Label !Label
+  | AAE !ArithExpr
+  deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
 -- | The Arg type
 --   represents an x86 assembly argument to an instruction
@@ -81,6 +86,12 @@ data Reg
   | ESI
   | EIP
   deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
+
+data Flag
+  = ZF
+  | CF
+  deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
+
 
 data Loc
   = LocReg Reg

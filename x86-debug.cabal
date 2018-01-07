@@ -21,6 +21,7 @@ library
    , Language.X86.Run
    , Language.X86.Assembly
    , Language.X86.Interpreter
+   , Language.X86.PP
   other-modules:
   build-depends:
      base

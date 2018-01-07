@@ -56,6 +56,7 @@ data ErrorType
   | InvalidDest (ArithExpr Reg)
   | InstructionNotFound Int32
   | UnexpectedNoMachine
+  | UnexpectedInstruction
   | Unexpected String
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
@@ -82,6 +83,7 @@ evalLoc m = \case
 stepForward :: Machine -> Either Error Machine
 stepForward machine@Machine{} =
   getInstruction machine >>= {- pure . traceShowId >>= -} \case
+    Label{} -> throwError "stepForward" machine UnexpectedInstruction
     IHalt -> pure machine
     IMov dest src -> applyDestSrc (flip const) dest src machine
     IAdd dest src -> applyDestSrc (+) dest src machine

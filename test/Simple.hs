@@ -86,6 +86,13 @@ jumps =
     , Label "after"
     , IAdd (AE $ Var EAX) (AE $ Lit 1)
     ]
+  , testReg EBX 7 $
+    [ ICmp (AE $ Var EAX) (AE $ Lit 0)
+    , IJz $ Var $ AL "after"
+    , IMov (AE $ Var EBX) (AE $ Lit 6)
+    , Label "after"
+    , IMov (AE $ Var EBX) (AE $ Lit 7)
+    ]
   ]
 
 

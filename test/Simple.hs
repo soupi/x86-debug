@@ -83,15 +83,48 @@ jumps =
     [ IMov (AE $ Var EAX) (AE $ Lit 6)
     , IJmp $ Var $ AL "after"
     , IMov (AE $ Var EAX) (AE $ Lit 1)
+    , IJmp $ Var $ AL "end"
     , Label "after"
     , IAdd (AE $ Var EAX) (AE $ Lit 1)
+    , Label "end"
     ]
   , testReg EBX 7 $
     [ ICmp (AE $ Var EAX) (AE $ Lit 0)
     , IJz $ Var $ AL "after"
     , IMov (AE $ Var EBX) (AE $ Lit 6)
+    , IJmp $ Var $ AL "end"
     , Label "after"
     , IMov (AE $ Var EBX) (AE $ Lit 7)
+    , Label "end"
+    ]
+
+  -- JGE
+  , testReg EBX 7 $
+    [ ICmp (AE $ Var EAX) (AE $ Lit 0)
+    , IJge $ Var $ AL "after"
+    , IMov (AE $ Var EBX) (AE $ Lit 6)
+    , IJmp $ Var $ AL "end"
+    , Label "after"
+    , IMov (AE $ Var EBX) (AE $ Lit 7)
+    , Label "end"
+    ]
+  , testReg EBX 7 $
+    [ ICmp (AE $ Var EAX) (AE $ Lit (-1))
+    , IJge $ Var $ AL "after"
+    , IMov (AE $ Var EBX) (AE $ Lit 6)
+    , IJmp $ Var $ AL "end"
+    , Label "after"
+    , IMov (AE $ Var EBX) (AE $ Lit 7)
+    , Label "end"
+    ]
+  , testReg EBX 6 $
+    [ ICmp (AE $ Var EAX) (AE $ Lit 1)
+    , IJge $ Var $ AL "after"
+    , IMov (AE $ Var EBX) (AE $ Lit 6)
+    , IJmp $ Var $ AL "end"
+    , Label "after"
+    , IMov (AE $ Var EBX) (AE $ Lit 7)
+    , Label "end"
     ]
   ]
 
@@ -99,11 +132,13 @@ jumps =
 -- Utils --
 
 testReg reg val code =
-  assertEq
-    (pure . getReg reg =<< getMachine =<< interpret [initMachine $ toCode code])
+  assertEq'
+    (getReg reg)
+    (getMachine =<< interpret [initMachine $ toCode code])
     (pure val)
 
 testFlag flag val code =
-  assertEq
-    (pure . getFlag flag =<< getMachine =<< interpret [initMachine $ toCode code])
+  assertEq'
+    (getFlag flag)
+    (getMachine =<< interpret [initMachine $ toCode code])
     (pure val)

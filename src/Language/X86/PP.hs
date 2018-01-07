@@ -69,6 +69,8 @@ ppInstruction = \case
     "jnz " <> ppAddress lbl
   IJz lbl ->
     "jz " <> ppAddress lbl
+  IJge lbl ->
+    "jge " <> ppAddress lbl
   Label lbl ->
     lbl <> ":"
   IRet ->

@@ -51,6 +51,7 @@ data Instruction
   | IJne  !Address
   | IJnz  !Address
   | IJz   !Address
+  | IJge  !Address
   | ICall !Address
   | IPush !Arg
   | IPop  !Arg
@@ -95,10 +96,17 @@ data Reg
   | EIP
   deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
 
+
+-- | x86 flags
+-- Description taken from: http://unixwiz.net/techtips/x86-jumps.html
 data Flag
-  = ZF
-  | CF
+  = CF -- ^ carry flag: Set on high-order bit carry or borrow; cleared otherwise
+  | ZF -- ^ zero flags: Set if result is zero; cleared otherwise
+  | SF -- ^ sign flag: Set equal to high-order bit of result (0 if positive 1 if negative)
+  | OF -- ^ overflow flag: Set if result is too large a positive number or too small a negative number (excluding sign bit) to fit in destination operand; cleared otherwise
+  -- | PF -- ^ parity flag: Set if low-order eight bits of result contain an even number of "1" bits; cleared otherwise
   deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
+
 
 
 data Loc

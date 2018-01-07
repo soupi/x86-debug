@@ -18,7 +18,7 @@ import Control.Arrow (second)
 
 import Language.X86.Assembly
 
-import Debug.Trace
+-- import Debug.Trace
 
 
 -----------
@@ -85,16 +85,26 @@ stepForward machine@Machine{} =
   getInstruction machine >>= {- pure . traceShowId >>= -} \case
     Label{} -> throwError "stepForward" machine UnexpectedInstruction
     IHalt -> pure machine
-    IMov dest src -> applyDestSrc (flip const) dest src machine
-    IAdd dest src -> applyDestSrc (+) dest src machine
-    ISub dest src -> applyDestSrc (-) dest src machine
-    IAnd dest src -> applyDestSrc (.&.) dest src machine
-    IOr  dest src -> applyDestSrc (.|.) dest src machine
-    IXor dest src -> applyDestSrc xor dest src machine
-    ISal dest src -> applyDestSrc (\x y -> shiftL x (fromIntegral y)) dest src machine
-    ISar dest src -> applyDestSrc (\x y -> shiftR x (fromIntegral y)) dest src machine
-    IShl dest src -> applyDestSrc (\x y -> shiftL (clearBit x 31) (fromIntegral y)) dest src machine
-    IShr dest src -> applyDestSrc (\x y -> shiftR (clearBit x 31) (fromIntegral y)) dest src machine
+    IMov dest src ->
+      applyDestSrc Nothing (flip const) dest src machine
+    IAdd dest src ->
+      applyDestSrc (Just $ \x y -> x + y > fromIntegral (maxBound :: Int32) || (x + y < fromIntegral (minBound :: Int32))) (+) dest src machine
+    ISub dest src ->
+      applyDestSrc (Just $ \x y -> x - y > fromIntegral (maxBound :: Int32) || (x - y < fromIntegral (minBound :: Int32))) (-) dest src machine
+    IAnd dest src ->
+      applyDestSrc Nothing (.&.) dest src machine
+    IOr  dest src ->
+      applyDestSrc Nothing (.|.) dest src machine
+    IXor dest src ->
+      applyDestSrc Nothing xor dest src machine
+    ISal dest src ->
+      applyDestSrc Nothing (\x y -> shiftL x (fromIntegral y)) dest src machine
+    ISar dest src ->
+      applyDestSrc Nothing (\x y -> shiftR x (fromIntegral y)) dest src machine
+    IShl dest src ->
+      applyDestSrc Nothing (\x y -> shiftL (clearBit x 31) (fromIntegral y)) dest src machine
+    IShr dest src ->
+      applyDestSrc Nothing (\x y -> shiftR (clearBit x 31) (fromIntegral y)) dest src machine
     IMul src -> do
       v <- evalArg machine src
       next $ overReg EAX (*v) machine
@@ -102,7 +112,13 @@ stepForward machine@Machine{} =
       evalDestSrc dest src machine >>= \case
         (LocReg r, v) -> do
           let rv = getReg r machine
-          next $ setFlag ZF (rv == v) machine
+          let (rv', v') = (fromIntegral rv, fromIntegral v :: Integer)
+          next
+            . setFlag CF (rv < v)
+            . setFlag SF (0 > rv - v)
+            . setFlag OF (rv' - v' > fromIntegral (maxBound :: Int32) || (rv' - v' < fromIntegral (minBound :: Int32)))
+            . setFlag ZF (rv == v)
+            $ machine
         (LocMem i, v)  -> do
           mv <- getMem i machine
           next $ setFlag ZF (mv == v) machine
@@ -140,24 +156,30 @@ stepForward machine@Machine{} =
           setAddress address machine
         else
           next machine
+    IJge address -> do
+      if getFlag SF machine == getFlag OF machine
+        then
+          setAddress address machine
+        else
+          next machine
 
     IPop dest ->
       next
         <=< checkStack
           . overReg ESP (\v -> v + 4)
-        <=< applyDestSrc (flip const) dest (Ref $ AE $ Var ESP)
+        <=< applyDestSrc Nothing (flip const) dest (Ref $ AE $ Var ESP)
           $ machine
 
     IPush src -> do
       next
-        <=< applyDestSrc (flip const) (Ref $ AE $ Var ESP) src
+        <=< applyDestSrc Nothing (flip const) (Ref $ AE $ Var ESP) src
         <=< checkStack
           . overReg ESP (\v -> v - 4)
           $ machine
 
     ICall addr -> do
       setAddress addr
-        <=< applyDestSrc (flip const) (Ref $ AE $ Var ESP) (AE $ Add (Var EIP) (Lit 4))
+        <=< applyDestSrc Nothing (flip const) (Ref $ AE $ Var ESP) (AE $ Add (Var EIP) (Lit 4))
         <=< checkStack
           . overReg ESP (\v -> v - 4)
           $ machine
@@ -166,7 +188,7 @@ stepForward machine@Machine{} =
       uncurry setAddress
         <=< secondF checkStack
           . second  (overReg ESP (\v -> v + 4))
-        <=< secondF (applyDestSrc (flip const) (AE $ Var EIP) (Ref $ AE $ Var ESP))
+        <=< secondF (applyDestSrc Nothing (flip const) (AE $ Var EIP) (Ref $ AE $ Var ESP))
           $ (Lit $ getReg EIP machine, machine)
 
 
@@ -268,13 +290,24 @@ evalDestSrc :: Arg -> Arg -> Machine -> Either Error (Loc, Int32)
 evalDestSrc dest src state =
   (,) <$> evalLoc state dest <*> evalArg state src
 
-applyDestSrc :: (Int32 -> Int32 -> Int32) -> Arg -> Arg -> Machine -> Either Error Machine
-applyDestSrc f dest src machine =
-  evalDestSrc dest src machine >>= \case
+applyDestSrc
+  :: Maybe (Int32 -> Int32 -> Bool)
+  -> (Int32 -> Int32 -> Int32) -> Arg -> Arg -> Machine -> Either Error Machine
+applyDestSrc setOFIf f dest src machine =
+  let
+    setFlags v1 v2 = maybe
+      id
+      (\test -> setFlag OF (test v1 v2))
+      setOFIf
+  in evalDestSrc dest src machine >>= \case
     (LocReg r, v) -> do
-      next $ overReg r (`f` v) machine
-    (LocMem i, v)  ->
-      next =<< overMem i (`f` v) machine
+      let vr = getReg r machine
+      next
+        . setFlags vr v
+        $ overReg r (`f` v) machine
+    (LocMem i, v)  -> do
+      vm <- getMem i machine
+      next . setFlags vm v =<< overMem i (`f` v) machine
 
 evalIndex :: Integral a => Int32 -> Machine -> Either Error a
 evalIndex i m = do

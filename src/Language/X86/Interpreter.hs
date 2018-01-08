@@ -44,7 +44,7 @@ evalArith lookupVar = \case
   Mul e1 e2 -> (*) <$> evalArith lookupVar e1 <*> evalArith lookupVar e2
 
 data Error
-  = Error Machine String ErrorType
+  = Error Machine String (Maybe Line) ErrorType
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
 data ErrorType
@@ -61,7 +61,9 @@ data ErrorType
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
 throwError :: String -> Machine -> ErrorType -> Either Error a
-throwError f m = Left . Error m f
+throwError f m = Left . Error m f mline
+  where
+    mline = either (const Nothing) Just $ getInstLine m
 
 ----------------
 -- Evaluators --
@@ -78,7 +80,14 @@ evalLoc :: Machine -> Arg -> Either Error Loc
 evalLoc m = \case
   AE (Var r) -> pure $ LocReg r
   AE e -> throwError "evalLoc" m $ InvalidDest e
-  arg -> LocMem <$> evalArg m arg
+  arg' -> LocMem <$> evalArg' arg'
+    where
+      evalArg' :: Arg -> Either Error Int32
+      evalArg' = \case
+        AE e -> evalArith (pure . flip getReg m) e
+        Ref arg -> do
+          evalArg m arg
+
 
 stepForward :: Machine -> Either Error Machine
 stepForward machine@Machine{} =
@@ -86,25 +95,25 @@ stepForward machine@Machine{} =
     Label{} -> throwError "stepForward" machine UnexpectedInstruction
     IHalt -> pure machine
     IMov dest src ->
-      applyDestSrc Nothing (flip const) dest src machine
+      next =<< applyDestSrc Nothing (flip const) dest src machine
     IAdd dest src ->
-      applyDestSrc (Just $ \x y -> x + y > fromIntegral (maxBound :: Int32) || (x + y < fromIntegral (minBound :: Int32))) (+) dest src machine
+      next =<< applyDestSrc (Just $ \x y -> x + y > fromIntegral (maxBound :: Int32) || (x + y < fromIntegral (minBound :: Int32))) (+) dest src machine
     ISub dest src ->
-      applyDestSrc (Just $ \x y -> x - y > fromIntegral (maxBound :: Int32) || (x - y < fromIntegral (minBound :: Int32))) (-) dest src machine
+      next =<< applyDestSrc (Just $ \x y -> x - y > fromIntegral (maxBound :: Int32) || (x - y < fromIntegral (minBound :: Int32))) (-) dest src machine
     IAnd dest src ->
-      applyDestSrc Nothing (.&.) dest src machine
+      next =<< applyDestSrc Nothing (.&.) dest src machine
     IOr  dest src ->
-      applyDestSrc Nothing (.|.) dest src machine
+      next =<< applyDestSrc Nothing (.|.) dest src machine
     IXor dest src ->
-      applyDestSrc Nothing xor dest src machine
+      next =<< applyDestSrc Nothing xor dest src machine
     ISal dest src ->
-      applyDestSrc Nothing (\x y -> shiftL x (fromIntegral y)) dest src machine
+      next =<< applyDestSrc Nothing (\x y -> shiftL x (fromIntegral y)) dest src machine
     ISar dest src ->
-      applyDestSrc Nothing (\x y -> shiftR x (fromIntegral y)) dest src machine
+      next =<< applyDestSrc Nothing (\x y -> shiftR x (fromIntegral y)) dest src machine
     IShl dest src ->
-      applyDestSrc Nothing (\x y -> shiftL (clearBit x 31) (fromIntegral y)) dest src machine
+      next =<< applyDestSrc Nothing (\x y -> shiftL (clearBit x 31) (fromIntegral y)) dest src machine
     IShr dest src ->
-      applyDestSrc Nothing (\x y -> shiftR (clearBit x 31) (fromIntegral y)) dest src machine
+      next =<< applyDestSrc Nothing (\x y -> shiftR (clearBit x 31) (fromIntegral y)) dest src machine
     IMul src -> do
       v <- evalArg machine src
       next $ overReg EAX (*v) machine
@@ -232,12 +241,15 @@ getMachine = \case
   _ -> throwError "getMachine" undefined UnexpectedNoMachine
 
 getInstruction :: Machine -> Either Error Instruction
-getInstruction machine = do
+getInstruction machine = lineInst <$> getInstLine machine
+
+getInstLine :: Machine -> Either Error Line
+getInstLine machine = do
   let eip = getReg EIP machine
   ip <- evalIndex (eip - fromIntegral (4 * (length $ mMem machine))) machine
   maybe
     (throwError "getInstruction" machine $ InvalidMem eip)
-    (pure . lineInst)
+    pure
     (S.lookup (fromIntegral ip) (cCode $ mCode machine))
 
 getReg :: Reg -> Machine -> Int32
@@ -302,12 +314,12 @@ applyDestSrc setOFIf f dest src machine =
   in evalDestSrc dest src machine >>= \case
     (LocReg r, v) -> do
       let vr = getReg r machine
-      next
+      pure
         . setFlags vr v
         $ overReg r (`f` v) machine
     (LocMem i, v)  -> do
       vm <- getMem i machine
-      next . setFlags vm v =<< overMem i (`f` v) machine
+      pure . setFlags vm v =<< overMem i (`f` v) machine
 
 evalIndex :: Integral a => Int32 -> Machine -> Either Error a
 evalIndex i m = do
@@ -345,10 +357,10 @@ setAddress address machine =
 
 checkStack :: Machine -> Either Error Machine
 checkStack m
-  | getReg ESP m >= fromIntegral (length $ mMem m) =
-    throwError "stepForward:IPush" m $ StackUnderflow
+  | getReg ESP m >= 4 * fromIntegral (length $ mMem m) =
+    throwError "checkStack:UF" m $ StackUnderflow
   | getReg ESP m < 0 =
-    throwError "stepForward:IPush" m $ StackOverflow
+    throwError "checkStack:OF" m $ StackOverflow
   | otherwise =
     pure m
 

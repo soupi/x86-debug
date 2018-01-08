@@ -13,6 +13,7 @@ tests =
       [ zipWith (\n t -> testProperty ("QuickCheck " ++ show n) t) [1..] qc
       , zipWith (\n t -> testCase ("Simple " ++ show n) t) [1..] simple
       , zipWith (\n t -> testCase ("Jumps  " ++ show n) t) [1..] jumps
+      , zipWith (\n t -> testCase ("Stack  " ++ show n) t) [1..] stack
       ]
 
 qc :: [(Int32 -> Bool)]
@@ -128,6 +129,19 @@ jumps =
     ]
   ]
 
+
+stack :: [Assertion]
+stack =
+  [ testReg EAX 7 $
+    [ IMov  (AE $ Var EBX) (AE $ Lit 8)
+    , IMov  (AE $ Var EAX) (AE $ Lit 1)
+    , IPush (AE $ Var EAX)
+    , IPush (AE $ Var EBX)
+    , IPop (AE $ Var EAX)
+    , IPop (AE $ Var EBX)
+    , ISub (AE $ Var EAX) (AE $ Var EBX)
+    ]
+  ]
 
 -- Utils --
 

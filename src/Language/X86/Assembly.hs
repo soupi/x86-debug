@@ -19,6 +19,7 @@ import qualified Data.Map as M
 data Code = Code
   { cCode :: S.Seq Line
   , cLabelMap :: M.Map Label Int32
+  , cLabelMapOrig :: M.Map Label Int32
   }
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
@@ -123,6 +124,7 @@ toCode insts = Code
     . (Line lastNum IHalt:)
     $ rInstructions
   , cLabelMap = labelmap
+  , cLabelMapOrig = labelmap
   }
   where
     (labelmap, rInstructions, lastNum) = foldl' go (M.empty, [], 0) insts

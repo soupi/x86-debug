@@ -80,13 +80,13 @@ evalLoc :: Machine -> Arg -> Either Error Loc
 evalLoc m = \case
   AE (Var r) -> pure $ LocReg r
   AE e -> throwError "evalLoc" m $ InvalidDest e
-  arg' -> LocMem <$> evalArg' arg'
+  arg' -> LocMem <$> evalDest arg'
     where
-      evalArg' :: Arg -> Either Error Int32
-      evalArg' = \case
+      evalDest :: Arg -> Either Error Int32
+      evalDest = \case
         AE e -> evalArith (pure . flip getReg m) e
         Ref arg -> do
-          evalArg m arg
+          evalDest arg
 
 
 stepForward :: Machine -> Either Error Machine
@@ -218,13 +218,12 @@ initMachine :: Code -> Machine
 initMachine code = Machine
   { mRegs  = M.fromList
     [ (EIP, memSize * 4)
-    , (ESP, memSize * 4 - 4)
+    , (ESP, memSize * 4 - 4*4)
     ]
   , mMem   = V.replicate memSize 0
   , mFlags = M.empty
   , mCode  = code
-    { cCode = cCode code
-    , cLabelMap = fmap ((memSize * 4 +) . (4*)) $ cLabelMap code
+    { cLabelMap = fmap ((memSize * 4 +) . (4*)) $ cLabelMap code
     }
   }
   where

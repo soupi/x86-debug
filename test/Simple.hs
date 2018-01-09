@@ -127,6 +127,16 @@ jumps =
     , IMov (AE $ Var EBX) (AE $ Lit 7)
     , Label "end"
     ]
+  , testReg EAX 2 $
+    [ IMov (AE (Var EAX)) (AE (Lit (-2147483647)))
+    , ICmp (AE (Var EAX)) (AE (Lit 1))
+    , IJe (Var (AL "if_false__0"))
+    , IMov (AE (Var EAX)) (AE (Lit 2))
+    , IJmp (Var (AL "if_done__0"))
+    , Label "if_false__0"
+    , IMov (AE (Var EAX)) (AE (Lit 7))
+    , Label "if_done__0"
+    ]
   ]
 
 

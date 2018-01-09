@@ -154,7 +154,7 @@ stepForward machine@Machine{} =
         else
           next machine
     IJe address -> do
-      if not (getFlag ZF machine)
+      if getFlag ZF machine
         then
           setAddress address machine
         else

@@ -6,6 +6,7 @@ module Language.X86.Interpreter where
 import qualified Data.Sequence as S
 import qualified Data.Vector as V
 import qualified Data.Map as M
+import qualified Data.Set as Set
 
 import Data.Int (Int32)
 import Data.Bits
@@ -68,6 +69,9 @@ throwError f m = Left . Error m f mline
 ----------------
 -- Evaluators --
 ----------------
+
+isHalt :: Machine -> Either Error Bool
+isHalt m = (==IHalt) <$> getInstruction m
 
 evalArg :: Machine -> Arg -> Either Error Int32
 evalArg m = \case
@@ -210,10 +214,53 @@ interpret !state = do
       m' <- stepForward machine
       interpret (m' : state)
 
+interpretBreak :: State -> Either Error State
+interpretBreak !state = do
+  !machine@Machine{mCode} <- getMachine state
+  if getReg EIP machine `elem` cBreakpoints mCode
+    then
+      pure state
+    else
+      getInstruction machine >>= \case
+        IHalt -> pure state
+        _ -> do
+          m' <- stepForward machine
+          interpret (m' : state)
+
+
+addBreakpoint :: Label -> Machine -> Machine
+addBreakpoint lbl machine@Machine{mCode} =
+  case M.lookup lbl (cLabelMap mCode) of
+    Just i
+      | i `notElem` cBreakpoints mCode ->
+        machine
+        { mCode =
+          mCode
+          { cBreakpoints = i `Set.insert` cBreakpoints mCode
+          }
+        }
+    _ ->
+      machine
+
+
+removeBreakpoint :: Label -> Machine -> Machine
+removeBreakpoint lbl machine@Machine{mCode} =
+  case M.lookup lbl (cLabelMap mCode) of
+    Just i ->
+        machine
+        { mCode =
+          mCode
+          { cBreakpoints = i `Set.delete` cBreakpoints mCode
+          }
+        }
+    _ ->
+      machine
+
 
 -----------
 -- Utils --
 -----------
+
 initMachine :: Code -> Machine
 initMachine code = Machine
   { mRegs  = M.fromList
@@ -223,12 +270,15 @@ initMachine code = Machine
   , mMem   = V.replicate memSize 0
   , mFlags = M.empty
   , mCode  = code
-    { cLabelMap = fmap ((memSize * 4 +) . (4*)) $ cLabelMap code
+    { cLabelMap =
+      fmap ((memSize * 4 +) . (4*)) $ cLabelMap code
+    , cBreakpoints =
+      Set.map ((memSize * 4 +) . (4*)) $ cBreakpoints code
     }
   }
   where
     memSize :: forall a. Integral a => a
-    memSize = 4096
+    memSize = 100
 
 ---------------
 -- Accessors --

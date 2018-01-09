@@ -158,11 +158,11 @@ stack =
 testReg reg val code =
   assertEq'
     (getReg reg)
-    (getMachine =<< interpret [initMachine $ toCode code])
+    (getMachine =<< interpret [initMachine $ toCode [] code])
     (pure val)
 
 testFlag flag val code =
   assertEq'
     (getFlag flag)
-    (getMachine =<< interpret [initMachine $ toCode code])
+    (getMachine =<< interpret [initMachine $ toCode [] code])
     (pure val)

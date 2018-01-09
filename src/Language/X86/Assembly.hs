@@ -9,8 +9,10 @@ import GHC.Generics
 import Control.DeepSeq
 
 import Data.Int (Int32)
+import Data.Maybe (mapMaybe)
 import qualified Data.Sequence as S
 import qualified Data.Map as M
+import qualified Data.Set as Set
 
 
 
@@ -20,6 +22,7 @@ data Code = Code
   { cCode :: S.Seq Line
   , cLabelMap :: M.Map Label Int32
   , cLabelMapOrig :: M.Map Label Int32
+  , cBreakpoints :: Set.Set Int32
   }
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
@@ -116,8 +119,8 @@ data Loc
   deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
 
 
-toCode :: [Instruction] -> Code
-toCode insts = Code
+toCode :: [Label] -> [Instruction] -> Code
+toCode breaks insts = Code
   { cCode =
     S.fromList
     . reverse
@@ -125,6 +128,8 @@ toCode insts = Code
     $ rInstructions
   , cLabelMap = labelmap
   , cLabelMapOrig = labelmap
+  , cBreakpoints = Set.fromList $
+      mapMaybe (`M.lookup` labelmap) breaks
   }
   where
     (labelmap, rInstructions, lastNum) = foldl' go (M.empty, [], 0) insts

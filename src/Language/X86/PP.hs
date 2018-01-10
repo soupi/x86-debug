@@ -7,8 +7,12 @@ module Language.X86.PP where
 import Data.Monoid
 import Data.Char (toLower)
 import Data.Data
+import Data.Foldable as F
 import GHC.Generics
 import Control.DeepSeq
+import Data.List
+import qualified Data.Map as M
+import qualified Data.Sequence as Seq
 
 import Language.X86.Assembly
 
@@ -25,6 +29,20 @@ instance Show Assembly where
 -----------------
 -- PP Assembly --
 -----------------
+
+-- | Pretty print Code to an assembly string of instructions
+ppCode :: Code -> String
+ppCode code =
+  unlines
+  . map ppInstruction
+  . F.toList
+  . F.foldl'
+     (\acc (lbl, line) ->
+        Seq.insertAt (fromIntegral line) (Label lbl) acc
+     )
+     (fmap lineInst $ cCode code)
+   . sortOn snd
+   $ M.toList (cLabelMapOrig code)
 
 -- | Pretty print a list of instructions to an assembly string
 ppAsm :: [Instruction] -> String

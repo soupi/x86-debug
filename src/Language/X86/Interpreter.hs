@@ -70,6 +70,15 @@ throwError f m = Left . Error m f mline
 -- Evaluators --
 ----------------
 
+isBreakpoint :: Machine -> Either Error Bool
+isBreakpoint m = do
+  lineNum <- lineAnn <$> getInstLine m
+  pure $
+    let
+      lineNum' = (fromIntegral (length $ mMem m) * 4 + 4 * lineNum)
+    in
+      lineNum' `elem` cBreakpoints (mCode m)
+
 isHalt :: Machine -> Either Error Bool
 isHalt m = (==IHalt) <$> getInstruction m
 
@@ -205,6 +214,15 @@ stepForward machine@Machine{} =
           $ (Lit $ getReg EIP machine, machine)
 
 
+interpretStep :: State -> Either Error State
+interpretStep !state = do
+  !machine <- getMachine state
+  getInstruction machine >>= \case
+    IHalt -> pure state
+    _ -> do
+      m' <- stepForward machine
+      pure (m' : state)
+
 interpret :: State -> Either Error State
 interpret !state = do
   !machine <- getMachine state
@@ -217,30 +235,53 @@ interpret !state = do
 interpretBreak :: State -> Either Error State
 interpretBreak !state = do
   !machine@Machine{mCode} <- getMachine state
-  if getReg EIP machine `elem` cBreakpoints mCode
-    then
-      pure state
-    else
-      getInstruction machine >>= \case
-        IHalt -> pure state
-        _ -> do
-          m' <- stepForward machine
-          interpret (m' : state)
+  getInstruction machine >>= \case
+    IHalt -> pure state
+    _ -> do
+      m' <- stepForward machine
+      if getReg EIP m' `elem` cBreakpoints mCode
+        then
+          pure (m' : state)
+        else
+          interpretBreak (m' : state)
 
+getLabelLineNum :: Label -> Machine -> Maybe Int32
+getLabelLineNum lbl Machine{mCode} =
+  M.lookup lbl (cLabelMapOrig mCode)
 
-addBreakpoint :: Label -> Machine -> Machine
+addBreakpoint :: Label -> Machine -> Either String Machine
 addBreakpoint lbl machine@Machine{mCode} =
   case M.lookup lbl (cLabelMap mCode) of
     Just i
       | i `notElem` cBreakpoints mCode ->
-        machine
+        pure $ machine
         { mCode =
           mCode
           { cBreakpoints = i `Set.insert` cBreakpoints mCode
           }
         }
     _ ->
-      machine
+      Left "Could not find label."
+
+addBreakpointLine :: Int32 -> Machine -> Either String Machine
+addBreakpointLine lineNum machine@Machine{mCode, mMem}
+  | lineNum > 0 && fromIntegral lineNum < length (cCode mCode) =
+    let
+      lineNum' = (fromIntegral (length mMem) * 4 + 4 * lineNum)
+    in if
+      | lineNum' `notElem` cBreakpoints mCode ->
+        pure machine
+          { mCode =
+            mCode
+            { cBreakpoints =
+              Set.insert
+                lineNum'
+                (cBreakpoints mCode)
+            }
+          }
+      | otherwise ->
+        Left "Breakpoint already set."
+  | otherwise = Left "Invalid line number."
 
 
 removeBreakpoint :: Label -> Machine -> Machine

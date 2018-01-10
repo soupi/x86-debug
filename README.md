@@ -5,4 +5,4 @@ An x86 assembly debugger
 > Status: WIP
 
 
-![Status](assets/01_repl.png)
+![Status](assets/02_repl.png)

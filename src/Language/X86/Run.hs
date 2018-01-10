@@ -4,11 +4,18 @@ module Language.X86.Run where
 
 import Language.X86
 
+import Prelude hiding (break)
+import Data.Int (Int32)
 import Data.Char
+import Data.Maybe
+import Data.Functor
 import Data.Foldable
 import Data.Bifunctor
+import Data.Traversable
+import Control.Applicative
 import System.Exit
 import System.IO
+import Text.Groom
 
 run :: IO ()
 run = do
@@ -32,6 +39,8 @@ help = unlines $
 data ReplState
   = NoState
   | ReplMachineState State
+  | Done
+  deriving Show
 
 repl :: ReplState -> IO ()
 repl s = do
@@ -42,55 +51,109 @@ repl s = do
       Nothing -> do
         hPutStrLn stderr $ "Command not understood: '" ++ cmd ++ "'."
         repl s
-      Just command ->
-        command args s
+      Just command -> do
+        rs <- command args s
+        case rs of
+          Done -> pure ()
+          _ -> repl rs
 
-commands :: [(String, [String] -> ReplState -> IO ())]
+commands :: [(String, [String] -> ReplState -> IO ReplState)]
 commands =
-  commands' ++ map (first (':':)) commands'
+  commands'
+    ++ map (first (':':)) commands'
+    ++ map (first $ (:[]) . head) commands'
+    ++ map (first $ (\x -> [':',x]) . head) commands'
 
-commands' :: [(String, [String] -> ReplState -> IO ())]
+commands' :: [(String, [String] -> ReplState -> IO ReplState)]
 commands' =
   [ ( "quit"
-    , const $ const $ pure ()
+    , const $ const $ pure Done
+    )
+
+  , ( "help"
+    , \_ s -> do
+        putStrLn help
+        pure s
     )
 
   , ( "?"
     , \_ s -> do
         putStrLn help
-        repl s
+        pure s
     )
+
   , ( "init"
     , const $ initReplMachineState
     )
+
   , ( "code"
-    , const $ ppCode
+    , \_ s -> s <$ printCode s
+    )
+
+  , ( "line"
+    , \_ s -> s <$ printLine s
     )
 
   , ( "regs"
-    , readReg
+    , \args s -> s <$ readReg args s
     )
 
   , ( "reg"
-    , readReg
+    , \args s -> s <$ readReg args s
     )
 
   , ( "next"
-    , const $ runNext
+    , const $ runNext interpretStep
     )
+
+  , ( "step"
+    , const $ runNext interpretBreak
+    )
+
+  , ( "end"
+    , const $ runNext interpret
+    )
+
+  , ( "prev"
+    , const $ runPrev
+    )
+
+  , ( "previous"
+    , const $ runPrev
+    )
+
+  , ( "break"
+    , addBreak
+    )
+
+  , ( "start"
+    , \_ s -> case s of
+        ReplMachineState ms@(_:_) ->
+          pure $ ReplMachineState [last ms]
+        _ -> do
+          hPutStrLn stderr "You need to init the machine first."
+          pure s
+    )
+
+  , ( "machine"
+    , \_ s -> do
+        putStrLn $ groom s
+        pure s
+    )
+
   ]
 
-initReplMachineState :: ReplState -> IO ()
+initReplMachineState :: ReplState -> IO ReplState
 initReplMachineState s = do
   putStrLn "Please enter code. To mark you are done write 'done'. "
   maybeCode <- readCode
   case maybeCode of
     Nothing -> do
       hPutStrLn stderr "Failed to parse code. Reverting to last state."
-      repl s
+      pure s
     Just code -> do
       putStrLn "Code parsed successfully. To view it type 'code'."
-      repl $ ReplMachineState [initMachine code]
+      pure $ ReplMachineState [initMachine code]
 
 readCode :: IO (Maybe Code)
 readCode = do
@@ -120,9 +183,10 @@ readCode = do
               go code
 
 
-ppCode :: ReplState -> IO ()
-ppCode s = do
+printCode :: ReplState -> IO ReplState
+printCode s = do
   case s of
+    Done -> pure ()
     NoState ->
       hPutStrLn stderr "No code to show yet. Use 'init' to insert code."
     ReplMachineState state -> case state of
@@ -130,17 +194,41 @@ ppCode s = do
         hPutStrLn stderr "No state available. Use 'init' to insert code."
       Machine{mCode} : _ ->
         putStrLn
-          . ppAsm
-          . toList
-          . fmap lineInst
-          . cCode
+          . ppCode
           $ mCode
 
-  repl s
+  pure s
 
-readReg :: [String] -> ReplState -> IO ()
+printLine :: ReplState -> IO ReplState
+printLine s = do
+  case s of
+    Done -> pure ()
+    NoState ->
+      hPutStrLn stderr "No code to show yet. Use 'init' to insert code."
+    ReplMachineState state -> case state of
+      [] ->
+        hPutStrLn stderr "No state available. Use 'init' to insert code."
+      m : _ -> do
+        case getInstLine m of
+          Left (Error _ str _ errtype) -> do
+            hPutStrLn stderr $ unwords
+              [ "*** Error in "
+              , show str
+              , show errtype
+              ]
+          Right line ->
+            putStrLn $ concat
+              [ show $ lineAnn line
+              , ":"
+              , ppInstruction $ lineInst line
+              ]
+
+  pure s
+
+readReg :: [String] -> ReplState -> IO ReplState
 readReg rs s = do
   case (map (map toUpper) rs, s) of
+    (_, Done) -> pure ()
     (_, NoState) ->
       hPutStrLn stderr "You need to init the machine first."
     (_, ReplMachineState []) ->
@@ -157,7 +245,7 @@ readReg rs s = do
                 "Unknown register"
               Just v ->
                 show v
-  repl s
+  pure s
 
 
 readMaybe :: Read a => String -> Maybe a
@@ -168,24 +256,104 @@ readMaybe s = case reads s of
 trim :: String -> String
 trim = unwords . words
 
-runNext :: ReplState -> IO ()
-runNext = \case
+runNext :: (State -> Either Error State) -> ReplState -> IO ReplState
+runNext runner = \case
   NoState -> do
     hPutStrLn stderr "You need to init a machine first."
-    repl NoState
+    pure NoState
+
   ReplMachineState [] -> do
     hPutStrLn stderr "Invalid state. Setting to no state."
-    repl NoState
+    pure NoState
+
   ReplMachineState machines@(machine:_) -> do
-    case (isHalt machine, stepForward machine) of
+    case (isHalt machine, runner machines) of
       (Right True, _) -> do
-        putStrLn "Halted."
-        repl $ ReplMachineState machines
-      (_, Right m') ->
-        repl $ ReplMachineState (m' : machines)
-      (_, Left (Error _ str _ errtype)) ->
+        putStrLn "Already halted."
+        pure $ ReplMachineState machines
+
+      (_, Right m') -> do
+        case (,) <$> isHalt (head m') <*> isBreakpoint (head m') of
+          Right (True, _) ->
+            putStrLn "Halted."
+          Right (False, True) -> do
+            putStrLn $ "Breakpoint reached."
+            printLine (ReplMachineState m') $> ()
+          _ ->
+            printLine (ReplMachineState m') $> ()
+        pure $ ReplMachineState m'
+
+      (_, Left (Error _ str _ errtype)) -> do
         hPutStrLn stderr $ unwords
           [ "*** Error in "
           , show str
           , show errtype
           ]
+        pure $ ReplMachineState machines
+
+  s -> pure s
+
+runPrev :: ReplState -> IO ReplState
+runPrev = \case
+  NoState -> do
+    hPutStrLn stderr "You need to init a machine first."
+    pure NoState
+  ReplMachineState [] -> do
+    hPutStrLn stderr "Invalid state. Setting to no state."
+    pure NoState
+  ReplMachineState machines@(_:[]) -> do
+    putStrLn "Already at the beginning."
+    _ <- printLine (ReplMachineState machines)
+    pure $ ReplMachineState machines
+  ReplMachineState (_:rest) -> do
+    _ <- printLine (ReplMachineState rest)
+    pure $ ReplMachineState rest
+  s -> pure s
+
+
+addBreak :: [String] -> ReplState -> IO ReplState
+addBreak bps s =
+  case (bps, s) of
+    (_, Done) -> pure s
+    (_, NoState) -> do
+      hPutStrLn stderr "You need to init the machine first."
+      pure s
+    (_, ReplMachineState []) -> do
+      hPutStrLn stderr "Invalid state."
+      pure s
+    ([], _) -> do
+      hPutStrLn stderr "No breakpoints requested."
+      pure s
+    (_, ReplMachineState machines@(machine:_)) -> do
+      let breaks = map (\b -> (b, readBreakpoint machine b)) bps
+      forM_ breaks $ \(break, line) -> do
+        case line of
+          Just _ -> pure ()
+          Nothing ->
+            hPutStrLn stderr $ "Unknown breakpoint: " ++ break
+      let possiblebreaks = filter (isJust . snd) breaks
+      (catMaybes -> truebreaks) <-
+        forM possiblebreaks $ \(break, Just line) ->
+          case addBreakpointLine line machine of
+            Right _ -> do
+              putStrLn $ "Breakpoint added at line: " ++ show line ++ "."
+              pure $ Just line
+            Left err -> do
+              hPutStrLn stderr $ "Error adding breakpoint " ++ break ++ ": " ++ err
+              pure $ Nothing
+
+      if null truebreaks
+        then
+          pure $ ReplMachineState machines
+        else
+          pure $ ReplMachineState
+            [ either (const m) id $ addBreakpointLine l m
+            | m <- machines
+            , l <- truebreaks
+            ]
+
+readBreakpoint :: Machine -> String -> Maybe Int32
+readBreakpoint machine b =
+  (readMaybe (map toUpper b) >>= pure . flip getReg machine)
+  <|> readMaybe b
+  <|> getLabelLineNum b machine

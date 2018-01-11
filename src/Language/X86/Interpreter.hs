@@ -298,6 +298,26 @@ removeBreakpoint lbl machine@Machine{mCode} =
       machine
 
 
+removeBreakpointLine :: Int32 -> Machine -> Either String Machine
+removeBreakpointLine lineNum machine@Machine{mCode, mMem}
+  | lineNum > 0 && fromIntegral lineNum < length (cCode mCode) =
+    let
+      lineNum' = (fromIntegral (length mMem) * 4 + 4 * lineNum)
+    in if
+      | lineNum' `elem` cBreakpoints mCode ->
+        pure machine
+          { mCode =
+            mCode
+            { cBreakpoints =
+              Set.delete
+                lineNum'
+                (cBreakpoints mCode)
+            }
+          }
+      | otherwise ->
+        Left "Breakpoint does not exist."
+  | otherwise = Left "Invalid line number."
+
 -----------
 -- Utils --
 -----------

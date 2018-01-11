@@ -110,7 +110,7 @@ commands' =
     , const $ runNext interpretBreak
     )
 
-  , ( "end"
+  , ( "run"
     , const $ runNext interpret
     )
 
@@ -123,8 +123,13 @@ commands' =
     )
 
   , ( "break"
-    , addBreak
+    , handleBreak addBreakpointLine "added" "adding"
     )
+
+  , ( "unbreak"
+    , handleBreak removeBreakpointLine "delete" "deleting"
+    )
+
 
   , ( "start"
     , \_ s -> case s of
@@ -311,8 +316,9 @@ runPrev = \case
   s -> pure s
 
 
-addBreak :: [String] -> ReplState -> IO ReplState
-addBreak bps s =
+handleBreak :: (Int32 -> Machine -> Either [Char] Machine)
+  -> String -> String -> [String] -> ReplState -> IO ReplState
+handleBreak handle addrmed addrming bps s =
   case (bps, s) of
     (_, Done) -> pure s
     (_, NoState) -> do
@@ -334,12 +340,12 @@ addBreak bps s =
       let possiblebreaks = filter (isJust . snd) breaks
       (catMaybes -> truebreaks) <-
         forM possiblebreaks $ \(break, Just line) ->
-          case addBreakpointLine line machine of
+          case handle line machine of
             Right _ -> do
-              putStrLn $ "Breakpoint added at line: " ++ show line ++ "."
+              putStrLn $ "Breakpoint " ++ addrmed ++ " at line: " ++ show line ++ "."
               pure $ Just line
             Left err -> do
-              hPutStrLn stderr $ "Error adding breakpoint " ++ break ++ ": " ++ err
+              hPutStrLn stderr $ "Error " ++ addrming ++ " breakpoint " ++ break ++ ": " ++ err
               pure $ Nothing
 
       if null truebreaks
@@ -347,7 +353,7 @@ addBreak bps s =
           pure $ ReplMachineState machines
         else
           pure $ ReplMachineState
-            [ either (const m) id $ addBreakpointLine l m
+            [ either (const m) id $ handle l m
             | m <- machines
             , l <- truebreaks
             ]

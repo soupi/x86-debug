@@ -41,6 +41,7 @@ ppCode code =
         Seq.insertAt (fromIntegral line) (Label lbl) acc
      )
      (fmap lineInst $ cCode code)
+   . reverse
    . sortOn snd
    $ M.toList (cLabelMapOrig code)
 
@@ -140,7 +141,7 @@ ppAE ppVar e = go (normalizeAE e)
 normalizeAE :: ArithExpr var -> Sign (ArithExpr var)
 normalizeAE = \case
   Lit i
-    | i < 0 -> Neg $ Lit $ 0 - i
+    | i < 0 && i > minBound -> Neg $ Lit $ 0 - i
     | otherwise -> Pos $ Lit i
   Var v -> Pos $ Var v
   Add e1 e2 ->

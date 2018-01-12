@@ -13,6 +13,7 @@ import Data.Foldable
 import Data.Bifunctor
 import Data.Traversable
 import Control.Applicative
+import Control.Exception (catch, SomeException(..))
 import System.Exit
 import System.IO
 import Text.Groom
@@ -103,7 +104,12 @@ commands' =
     )
 
   , ( "next"
-    , const $ runNext interpretStep
+    , const $
+        let
+          doStep s = case interpretStep s of
+            Right (_, s') -> (Nothing, s')
+            Left err -> (pure err, s)
+        in runNext doStep
     )
 
   , ( "step"
@@ -131,7 +137,7 @@ commands' =
     )
 
 
-  , ( "start"
+  , ( "begin"
     , \_ s -> case s of
         ReplMachineState ms@(_:_) ->
           pure $ ReplMachineState [last ms]
@@ -140,12 +146,35 @@ commands' =
           pure s
     )
 
-  , ( "machine"
+  , ( "mem"
+    , \_ s -> do
+        case s of
+          ReplMachineState (m':_) -> do
+            print $ mMem m'
+          _ -> do
+            hPutStrLn stderr "You need to init the machine first."
+        pure s
+    )
+
+  , ( "stack"
+    , \_ s -> flip catch (\(SomeException e) -> print e $> s) $ do
+        case s of
+          ReplMachineState (m':_) -> do
+            case getStack m' of
+              Left err ->
+                hPutStrLn stderr (show err)
+              Right stack ->
+                print stack
+          _ -> do
+            hPutStrLn stderr "You need to init the machine first."
+        pure s
+    )
+
+  , ( "machines"
     , \_ s -> do
         putStrLn $ groom s
         pure s
     )
-
   ]
 
 initReplMachineState :: ReplState -> IO ReplState
@@ -261,7 +290,7 @@ readMaybe s = case reads s of
 trim :: String -> String
 trim = unwords . words
 
-runNext :: (State -> Either Error State) -> ReplState -> IO ReplState
+runNext :: (State -> (Maybe Error, State)) -> ReplState -> IO ReplState
 runNext runner = \case
   NoState -> do
     hPutStrLn stderr "You need to init a machine first."
@@ -277,7 +306,7 @@ runNext runner = \case
         putStrLn "Already halted."
         pure $ ReplMachineState machines
 
-      (_, Right m') -> do
+      (_, (Nothing, m')) -> do
         case (,) <$> isHalt (head m') <*> isBreakpoint (head m') of
           Right (True, _) ->
             putStrLn "Halted."
@@ -288,13 +317,13 @@ runNext runner = \case
             printLine (ReplMachineState m') $> ()
         pure $ ReplMachineState m'
 
-      (_, Left (Error _ str _ errtype)) -> do
+      (_, (Just (Error _ str _ errtype), m')) -> do
         hPutStrLn stderr $ unwords
           [ "*** Error in "
           , show str
           , show errtype
           ]
-        pure $ ReplMachineState machines
+        pure $ ReplMachineState m'
 
   s -> pure s
 
@@ -363,3 +392,4 @@ readBreakpoint machine b =
   (readMaybe (map toUpper b) >>= pure . flip getReg machine)
   <|> readMaybe b
   <|> getLabelLineNum b machine
+

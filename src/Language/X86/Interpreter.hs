@@ -15,7 +15,6 @@ import Data.Data
 import GHC.Generics
 import Control.DeepSeq
 import Control.Monad
-import Control.Arrow (second)
 
 import Language.X86.Assembly
 
@@ -207,41 +206,41 @@ stepForward machine@Machine{} =
           $ machine
 
     IRet -> do
-      uncurry setAddress
-        <=< secondF checkStack
-          . second  (overReg ESP (\v -> v + 4))
-        <=< secondF (applyDestSrc Nothing (flip const) (AE $ Var EIP) (Ref $ AE $ Var ESP))
-          $ (Lit $ getReg EIP machine, machine)
+      checkStack
+          . (overReg ESP (\v -> v + 4))
+        <=< (applyDestSrc Nothing (flip const) (AE $ Var EIP) (Ref $ AE $ Var ESP))
+          $ machine
 
+data Status
+  = Halted
+  | Cont
+  deriving Show
 
-interpretStep :: State -> Either Error State
+interpretStep :: State -> Either Error (Status, State)
 interpretStep !state = do
   !machine <- getMachine state
   getInstruction machine >>= \case
-    IHalt -> pure state
+    IHalt -> pure (Halted, state)
     _ -> do
       m' <- stepForward machine
-      pure (m' : state)
+      pure (Cont, (m' : state))
 
-interpret :: State -> Either Error State
-interpret !state = do
-  !machine <- getMachine state
-  getInstruction machine >>= \case
-    IHalt -> pure state
-    _ -> do
-      m' <- stepForward machine
-      interpret (m' : state)
+interpret :: State -> (Maybe Error, State)
+interpret !state =
+  case interpretStep state of
+    Left err -> (pure err, state)
+    Right (Halted, s') -> (Nothing, s')
+    Right (Cont, s') -> interpret s'
 
-interpretBreak :: State -> Either Error State
+interpretBreak :: State -> (Maybe Error, State)
 interpretBreak !state = do
-  !machine@Machine{mCode} <- getMachine state
-  getInstruction machine >>= \case
-    IHalt -> pure state
-    _ -> do
-      m' <- stepForward machine
-      if getReg EIP m' `elem` cBreakpoints mCode
+  case interpretStep state >>= \s' -> (,s') <$> getMachine (snd s') of
+    Left err -> (pure err, state)
+    Right (_, (Halted, s')) -> (Nothing, s')
+    Right (m', (Cont, s')) ->
+      if getReg EIP m' `elem` cBreakpoints (mCode m')
         then
-          pure (m' : state)
+          (Nothing, s')
         else
           interpretBreak (m' : state)
 
@@ -356,7 +355,7 @@ getInstruction machine = lineInst <$> getInstLine machine
 getInstLine :: Machine -> Either Error Line
 getInstLine machine = do
   let eip = getReg EIP machine
-  ip <- evalIndex (eip - fromIntegral (4 * (length $ mMem machine))) machine
+  ip <- evalCodeIndex eip machine
   maybe
     (throwError "getInstruction" machine $ InvalidMem eip)
     pure
@@ -386,17 +385,17 @@ overFlag flag f machine =
 
 getMem :: Int32 -> Machine -> Either Error Int32
 getMem i m = do
-  index <- evalIndex i m
+  index <- evalMemIndex i m
   pure $ mMem m V.! index
 
 setMem :: Int32 -> Int32 -> Machine -> Either Error Machine
 setMem i val machine = do
-  index <- evalIndex i machine
+  index <- evalMemIndex i machine
   pure $ machine { mMem = mMem machine V.// [(fromIntegral index, val)] }
 
 overMem :: Int32 -> (Int32 -> Int32) -> Machine -> Either Error Machine
 overMem i f machine = do
-  index <- evalIndex i machine
+  index <- evalMemIndex i machine
   pure $ machine
     { mMem =
         mMem machine
@@ -431,8 +430,13 @@ applyDestSrc setOFIf f dest src machine =
       vm <- getMem i machine
       pure . setFlags vm v =<< overMem i (`f` v) machine
 
-evalIndex :: Integral a => Int32 -> Machine -> Either Error a
-evalIndex i m = do
+getStack :: Machine -> Either Error (V.Vector Int32)
+getStack m = do
+  si <- evalMemIndex (getReg ESP m) m
+  pure $ V.slice si (length (mMem m) - si) (mMem m)
+
+evalIndex :: Integral a => (Machine -> Int32) -> Int32 -> Machine -> Either Error a
+evalIndex len i m = do
   index <-
     if
       | i == 0 ->
@@ -445,10 +449,21 @@ evalIndex i m = do
   if
     | index < 0 ->
       throwError "evalIndex2" m $ InvalidMem index
-    | fromIntegral index >= length (mMem m) ->
+    | index >= len m ->
       throwError "evalIndex3" m $ InvalidMem index
     | otherwise ->
       pure $ fromIntegral index
+
+
+evalMemIndex :: Integral a => Int32 -> Machine -> Either Error a
+evalMemIndex = evalIndex (fromIntegral . length . mMem)
+
+evalCodeIndex :: Integral a => Int32 -> Machine -> Either Error a
+evalCodeIndex i m =
+  evalIndex
+    (fromIntegral . length . cCode . mCode)
+    (i - fromIntegral (4 * (length $ mMem m)))
+    m
 
 setAddress :: Address -> Machine -> Either Error Machine
 setAddress address machine =
@@ -476,3 +491,8 @@ checkStack m
 
 secondF :: Functor f => (b -> f c) -> (a, b) -> f (a, c)
 secondF f (a, b) = (a,) <$> f b
+
+mToE :: (Maybe a, b) -> Either a b
+mToE (a, b) = case a of
+  Nothing -> Right b
+  Just e -> Left e

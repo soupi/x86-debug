@@ -14,6 +14,7 @@ tests =
       , zipWith (\n t -> testCase ("Simple " ++ show n) t) [1..] simple
       , zipWith (\n t -> testCase ("Jumps  " ++ show n) t) [1..] jumps
       , zipWith (\n t -> testCase ("Stack  " ++ show n) t) [1..] stack
+      , zipWith (\n t -> testCase ("Calls  " ++ show n) t) [1..] calls
       ]
 
 qc :: [(Int32 -> Bool)]
@@ -150,6 +151,19 @@ stack =
     , IPop (AE $ Var EAX)
     , IPop (AE $ Var EBX)
     , ISub (AE $ Var EAX) (AE $ Var EBX)
+    ]
+  ]
+
+calls :: [Assertion]
+calls =
+  [ testReg EAX 7 $
+    [ ICall (Var (AL "set"))
+    , IJmp (Var (AL "end"))
+    , IMov  (AE $ Var EAX) (AE $ Lit 8)
+    , Label "set"
+    , IMov  (AE $ Var EAX) (AE $ Lit 7)
+    , IRet
+    , Label "end"
     ]
   ]
 

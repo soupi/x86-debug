@@ -2,6 +2,7 @@ module Main where
 
 import Testing
 import qualified Simple
+import qualified Parser
 
 main :: IO ()
 main = defaultMain tests
@@ -11,4 +12,5 @@ tests =
   testGroup
     "Tests"
     [ Simple.tests
+    , Parser.tests
     ]

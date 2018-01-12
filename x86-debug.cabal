@@ -22,6 +22,8 @@ library
    , Language.X86.Assembly
    , Language.X86.Interpreter
    , Language.X86.PP
+   , Language.X86.Lexer
+   , Language.X86.Parser
   other-modules:
   build-depends:
      base
@@ -29,13 +31,8 @@ library
     ,vector
     ,bifunctors
     ,groom
-    ,transformers
-    ,mtl
     ,syb
     ,deepseq
-    ,groom
-    ,text
-    ,bytestring
     ,megaparsec
 
   default-extensions:
@@ -69,8 +66,6 @@ executable x86-debug
     , x86-debug
     , optparse-generic
     , stm
-    , brick
-    , microlens
 
 test-suite test
   default-language:    Haskell2010
@@ -81,6 +76,7 @@ test-suite test
   other-modules:
       Testing
     , Simple
+    , Parser
   build-depends:       base
                      , groom
                      , text

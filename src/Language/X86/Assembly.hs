@@ -98,7 +98,7 @@ data Reg
   | EBP
   | ESI
   | EIP
-  deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
+  deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable, Bounded, Enum)
 
 
 -- | x86 flags

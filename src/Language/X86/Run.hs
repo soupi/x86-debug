@@ -175,7 +175,36 @@ commands' =
         putStrLn $ groom s
         pure s
     )
+
+  , ( "file"
+    , parseFile
+    )
   ]
+
+parseFile :: [FilePath] -> ReplState -> IO ReplState
+parseFile args state = do
+  catch
+    (do
+      case args of
+        [file] -> do
+          codeStr <- readFile file
+          case parseCode "repl" codeStr of
+            Left er -> do
+              hPutStrLn stderr (parseErrorPretty er)
+              pure state
+            Right code -> do
+              putStrLn "Code parsed successfully. To view it type 'code'."
+              pure $ ReplMachineState [initMachine $ toCode [] code]
+        xs -> do
+          hPutStrLn stderr ("Expecting one filepath argument, but got: " ++ show (length xs))
+          pure state
+
+    )
+    (\(SomeException e) -> do
+      hPutStrLn stderr (show e)
+      pure state
+    )
+
 
 initReplMachineState :: ReplState -> IO ReplState
 initReplMachineState s = do
@@ -201,19 +230,19 @@ readCode = do
   where
     go code = do
       putStr "...> "
-      getLine >>= pure . trim >>= \case
+      getLine >>= \case
         "quit" -> do
           putStrLn "Bye!"
           exitSuccess
         "discard" ->
           pure []
         "done" ->
-          pure $ reverse code
+          pure $ concat $ reverse code
         line -> do
-          case readMaybe line of
-            Just c -> go (c : code)
-            _ -> do
-              hPutStrLn stderr "Failed to read line."
+          case parseCodeLine "repl" line of
+            Right c -> go (c : code)
+            Left er -> do
+              hPutStrLn stderr ("*** Error: Failed to read line.\n" ++ parseErrorPretty er)
               go code
 
 

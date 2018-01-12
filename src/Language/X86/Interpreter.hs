@@ -338,7 +338,7 @@ initMachine code = Machine
   }
   where
     memSize :: forall a. Integral a => a
-    memSize = 100
+    memSize = 400
 
 ---------------
 -- Accessors --

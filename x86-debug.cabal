@@ -2,7 +2,7 @@ name:                x86-debug
 version:             0.1.0.0
 synopsis:            An x86 assembly debugger
 description:         Please see README.md
-homepage:            https://github.com/soupi/x86
+homepage:            https://github.com/soupi/x86-debug
 license:             BSD3
 license-file:        LICENSE
 author:              Gil Mizrahi

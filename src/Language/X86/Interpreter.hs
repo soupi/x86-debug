@@ -87,6 +87,7 @@ evalArg m = \case
   Ref arg -> do
     i <- evalArg m arg
     getMem i m
+  AEL e -> evalArith (flip getAddr m) e
 
 evalLoc :: Machine -> Arg -> Either Error Loc
 evalLoc m = \case
@@ -99,6 +100,7 @@ evalLoc m = \case
         AE e -> evalArith (pure . flip getReg m) e
         Ref arg -> do
           evalDest arg
+        AEL e -> evalArith (flip getAddr m) e
 
 
 stepForward :: Machine -> Either Error Machine
@@ -360,6 +362,17 @@ getInstLine machine = do
     (throwError "getInstruction" machine $ InvalidMem eip)
     pure
     (S.lookup (fromIntegral ip) (cCode $ mCode machine))
+
+getAddr :: AddressVar -> Machine -> Either Error Int32
+getAddr = \case
+  AR reg -> pure . fromMaybe 0 . M.lookup reg . mRegs
+  AL lbl -> \m ->
+    maybe
+      (throwError "getAddr"  m $ Unexpected $ "Unknown label: " ++ show lbl)
+      pure
+    . M.lookup lbl . cLabelMap . mCode
+    $ m
+
 
 getReg :: Reg -> Machine -> Int32
 getReg reg = fromMaybe 0 . M.lookup reg . mRegs

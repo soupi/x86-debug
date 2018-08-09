@@ -77,6 +77,7 @@ type Address = ArithExpr AddressVar
 data Arg
   = Ref !Arg
   | AE !(ArithExpr Reg)
+  | AEL !Address
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic, NFData)
 
 data ArithExpr var

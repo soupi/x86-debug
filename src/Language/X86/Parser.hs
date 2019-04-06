@@ -14,30 +14,30 @@ import Text.Groom
 
 import qualified Text.Megaparsec as Prs
 import qualified Text.Megaparsec.Char as Prs
-import qualified Text.Megaparsec.Expr as Prs
+import qualified Control.Monad.Combinators.Expr as Prs
 
 import Language.X86.Assembly
 import Language.X86.Lexer
 
-parseErrorPretty :: (Prs.ParseError (Prs.Token String) Void) -> String
-parseErrorPretty = Prs.parseErrorPretty
+parseErrorPretty :: Prs.ParseErrorBundle String Void -> String
+parseErrorPretty = Prs.errorBundlePretty
 
-parseCode :: String -> String -> Either (Prs.ParseError (Prs.Token String) Void) [Instruction]
+parseCode :: String -> String -> Either (Prs.ParseErrorBundle String Void) [Instruction]
 parseCode src content =
   Prs.parse (concat <$> many1 (parseInstWithLabel <* lexeme Prs.eol)) src (content ++ "\n")
 
-parseCodeLine :: String -> String -> Either (Prs.ParseError (Prs.Token String) Void) [Instruction]
+parseCodeLine :: String -> String -> Either (Prs.ParseErrorBundle String Void) [Instruction]
 parseCodeLine src content = Prs.parse parseLine src (content ++ "\n")
 
 parseLine :: Parser [Instruction]
 parseLine = parseInstWithLabel <* lexeme Prs.eol
 
-parse :: Parser a -> String -> String -> Either (Prs.ParseError (Prs.Token String) Void) a
+parse :: Parser a -> String -> String -> Either (Prs.ParseErrorBundle String Void) a
 parse parser srcName content =
   Prs.parse (parser <* Prs.eof) srcName content
 
 parsePrint :: Show a => Parser a -> String -> IO ()
-parsePrint p = putStrLn . either Prs.parseErrorPretty groom . parse p "test"
+parsePrint p = putStrLn . either parseErrorPretty groom . parse p "test"
 
 parseLabel :: Parser Instruction
 parseLabel =

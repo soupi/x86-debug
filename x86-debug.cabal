@@ -12,7 +12,7 @@ category:            Compiler
 build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
-tested-with:         GHC == 8.2.2
+tested-with:         GHC == 8.6.4
 
 library
   hs-source-dirs:      src
@@ -34,6 +34,7 @@ library
     ,syb
     ,deepseq
     ,megaparsec
+    ,parser-combinators
 
   default-extensions:
       ConstraintKinds

@@ -12,7 +12,6 @@ category:            Compiler
 build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
-tested-with:         GHC == 8.6.4
 
 library
   hs-source-dirs:      src
@@ -26,15 +25,14 @@ library
    , Language.X86.Parser
   other-modules:
   build-depends:
-     base
-    ,containers
-    ,vector
-    ,bifunctors
-    ,groom
-    ,syb
-    ,deepseq
-    ,megaparsec
-    ,parser-combinators
+      base
+    , containers
+    , vector
+    , bifunctors
+    , groom
+    , deepseq
+    , megaparsec
+    , parser-combinators
 
   default-extensions:
       ConstraintKinds

@@ -7,7 +7,6 @@ import Control.Arrow ((&&&), first)
 import Data.Data (showConstr, toConstr, dataTypeConstrs, dataTypeOf)
 import Data.Char (toUpper, toLower)
 import Data.Functor
-import Control.Monad (void)
 import Control.Applicative ((<|>))
 
 import Language.X86.Assembly

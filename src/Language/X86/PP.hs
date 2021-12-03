@@ -4,7 +4,6 @@
 
 module Language.X86.PP where
 
-import Data.Monoid
 import Data.Char (toLower)
 import Data.Data
 import Data.Foldable as F
@@ -123,6 +122,7 @@ ppArg :: Arg -> String
 ppArg = \case
   Ref a -> "[" ++ ppArg a ++ "]"
   AE a  -> ppAE show a
+  AEL a  -> ppAE show a
 
 -- | Pretty print an argument
 ppAE :: (var -> String) -> ArithExpr var -> String

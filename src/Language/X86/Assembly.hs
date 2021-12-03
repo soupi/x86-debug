@@ -14,10 +14,6 @@ import qualified Data.Sequence as S
 import qualified Data.Map as M
 import qualified Data.Set as Set
 
-
-
-
-
 data Code = Code
   { cCode :: S.Seq Line
   , cLabelMap :: M.Map Label Int32
@@ -109,7 +105,7 @@ data Flag
   | ZF -- ^ zero flags: Set if result is zero; cleared otherwise
   | SF -- ^ sign flag: Set equal to high-order bit of result (0 if positive 1 if negative)
   | OF -- ^ overflow flag: Set if result is too large a positive number or too small a negative number (excluding sign bit) to fit in destination operand; cleared otherwise
-  -- | PF -- ^ parity flag: Set if low-order eight bits of result contain an even number of "1" bits; cleared otherwise
+  --  | PF -- ^ parity flag: Set if low-order eight bits of result contain an even number of "1" bits; cleared otherwise
   deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
 
 
